@@ -77,7 +77,6 @@ export async function payWithPolicy(input: {
   });
 }
 
-// at bottom of src/policy.ts
 export async function getPolicyState(campaignId: string) {
   const { totalCents, byMemo } = await getTotals(campaignId);
   return {
