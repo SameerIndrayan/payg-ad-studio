@@ -27,6 +27,7 @@ async function getPolicy(id: string): Promise<PolicyResp | null> {
   try { return await api.get<PolicyResp>(`/campaigns/${id}/policy`); } catch { return null; }
 }
 
+// Next 16: params can be a Promise—await it.
 export default async function CampaignPage(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params;
 
@@ -73,7 +74,7 @@ export default async function CampaignPage(props: { params: Promise<{ id: string
         <table style={{ borderCollapse: 'collapse', width: '100%', maxWidth: 700 }}>
           <thead>
             <tr>
-              <th style={{ textAlign: 'left', borderBottom: '1px solid #eee', padding: 8 }}>Key</th>
+              <th style={{ textAlign: 'left', borderBottom: '1px solid #eee', padding: 8 }}>Tool</th>
               <th style={{ textAlign: 'right', borderBottom: '1px solid #eee', padding: 8 }}>Cap</th>
               <th style={{ textAlign: 'right', borderBottom: '1px solid #eee', padding: 8 }}>Spend</th>
             </tr>

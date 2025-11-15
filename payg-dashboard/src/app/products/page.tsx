@@ -1,12 +1,13 @@
 // src/app/products/page.tsx
 import { api } from '@/lib/api';
 import ImportButton from '@/components/ImportButton';
+import CreateCampaignButton from '@/components/CreateCampaignButton';
 
 type Product = {
   id: string | number;
   title: string;
   imageUrl?: string | null;
-  priceCents?: number | null; // matches your backend
+  priceCents?: number | null;
 };
 
 async function getProducts(): Promise<Product[]> {
@@ -65,9 +66,8 @@ export default async function ProductsPage() {
                   )}
                 </div>
 
-                <button type="button" style={{ padding: '6px 10px' }}>
-                  New Campaign
-                </button>
+                {/* ✅ The button belongs here, inside the map */}
+                <CreateCampaignButton productId={p.id} />
               </div>
             </li>
           ))}
