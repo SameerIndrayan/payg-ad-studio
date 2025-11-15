@@ -2,10 +2,19 @@ import "dotenv/config";
 import express from "express";
 import { products } from "./routes/products";
 import { campaigns } from "./routes/campaigns";
-import { events } from "./routes/events"; // ← add this
+import { events } from "./routes/events"; 
+import cors from "cors";
+
 
 const app = express();
 app.use(express.json());
+
+app.use(cors({
+  origin: true,           
+  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  maxAge: 600
+}));
 
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true, service: "payg-ad-studio" });
@@ -13,7 +22,7 @@ app.get("/healthz", (_req, res) => {
 
 app.use("/products", products);
 app.use("/campaigns", campaigns);
-app.use("/events", events); // ← add this
+app.use("/events", events); 
 
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => {
