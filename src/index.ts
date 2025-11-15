@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { products } from "./routes/products";
+import { campaigns } from "./routes/campaigns";
 
 const app = express();
 app.use(express.json());
@@ -12,6 +13,7 @@ app.get("/healthz", (_req, res) => {
 
 // routes
 app.use("/products", products);
+app.use("/campaigns", campaigns);
 
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => {

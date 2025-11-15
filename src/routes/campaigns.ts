@@ -100,3 +100,157 @@ campaigns.get("/:id/ledger", async (req, res) => {
 
   res.json({ totalCostCents, revenueCents, receipts, events });
 });
+
+
+// ---- Mock asset purchase: POST /campaigns/:id/assets
+campaigns.post("/:id/assets", async (req, res) => {
+  const { id } = req.params;
+  const { vendor = "mockstock", assetType = "image", priceCents = 25 } = req.body || {};
+
+  const campaign = await prisma.campaign.findUnique({ where: { id } });
+  if (!campaign) return res.status(404).json({ error: "campaign not found" });
+
+  // record the tool call (selection/generation of asset)
+  const toolCall = await prisma.toolCall.create({
+    data: {
+      campaignId: campaign.id,
+      tool: "image_gen",
+      inputJson: JSON.stringify({ vendor, assetType }),
+      outputJson: JSON.stringify({ picked: `${vendor}/${assetType}` }),
+      utilityScore: 7,
+      costCents: 0 // tool step itself free; the "purchase" is the paid part
+    }
+  });
+
+  // create the asset purchase row
+  const asset = await prisma.assetPurchase.create({
+    data: {
+      campaignId: campaign.id,
+      vendor,
+      assetType,
+      licenseRef: `LIC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      costCents: Number(priceCents)
+    }
+  });
+
+  // write the receipt for the paid asset
+  await pay({
+    campaignId: campaign.id,
+    amountCents: Number(priceCents),
+    memo: "asset_purchase",
+    payload: { toolCallId: toolCall.id, assetId: asset.id, vendor, assetType }
+  });
+
+  res.status(201).json({ asset, toolCall });
+});
+
+campaigns.post("/:id/captions", async (req, res) => {
+  const { id } = req.params;
+  const { tone = "friendly", variations = 3 } = req.body || {};
+
+  const campaign = await prisma.campaign.findUnique({
+    where: { id },
+    include: { product: true }
+  });
+  if (!campaign) return res.status(404).json({ error: "campaign not found" });
+
+  const p = campaign.product;
+  const opts = [
+    `${p.title}: comfy, clean look. Grab it today.`,
+    `Snug + simple. ${p.title} for everyday fits.`,
+    `Your new go-to: ${p.title}. Soft. Solid. Done.`,
+    `Level up basics with ${p.title}.`,
+    `Keep it cozy with ${p.title}.`
+  ].slice(0, Math.max(1, Math.min(variations, 5)));
+
+  const toolCall = await prisma.toolCall.create({
+    data: {
+      campaignId: campaign.id,
+      tool: "caption",
+      inputJson: JSON.stringify({ tone, variations }),
+      outputJson: JSON.stringify({ options: opts }),
+      utilityScore: 8,
+      costCents: 2
+    }
+  });
+
+  // record a 2¢ spend for caption generation
+  await (async function payCaption() {
+    const crypto = await import("crypto");
+    const payloadHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify({ toolCallId: toolCall.id, tool: "caption" }))
+      .digest("hex");
+
+    await prisma.receipt.create({
+      data: {
+        campaignId: campaign.id,
+        amountCents: 2,
+        currency: "USD",
+        rail: "mock",
+        memo: "tool_call",
+        policyApplied: "dev-policy",
+        payloadHash
+      }
+    });
+  })();
+
+  res.status(201).json({ options: opts, toolCallId: toolCall.id });
+});
+
+
+// ---- Mock post: POST /campaigns/:id/post
+campaigns.post("/:id/post", async (req, res) => {
+  const { id } = req.params;
+  const { platform = "mock", caption, mediaUrl } = req.body || {};
+
+  const campaign = await prisma.campaign.findUnique({
+    where: { id },
+    include: { product: true }
+  });
+  if (!campaign) return res.status(404).json({ error: "campaign not found" });
+
+  // Fallback to a simple caption if none provided
+  const finalCaption =
+    caption ||
+    `${campaign.product.title}: on sale today. Tap to learn more.`;
+
+  // "Schedule" and immediately "post"
+  const now = new Date();
+  const post = await prisma.post.create({
+    data: {
+      campaignId: campaign.id,
+      platform,
+      caption: finalCaption,
+      mediaUrl: mediaUrl || campaign.product.imageUrl || null,
+      scheduledAt: now,
+      postedAt: now,
+      postUrl: `http://localhost:3000/mock-posts/${crypto
+        .createHash("md5")
+        .update(campaign.id + now.toISOString())
+        .digest("hex")
+        .slice(0, 10)}`
+    }
+  });
+
+  // Charge 1¢ for a "publish" API call
+  const payload = { postId: post.id, platform };
+  const payloadHash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex");
+
+  await prisma.receipt.create({
+    data: {
+      campaignId: campaign.id,
+      amountCents: 1,
+      currency: "USD",
+      rail: "mock",
+      memo: "post",
+      policyApplied: "dev-policy",
+      payloadHash
+    }
+  });
+
+  res.status(201).json({ post });
+});
