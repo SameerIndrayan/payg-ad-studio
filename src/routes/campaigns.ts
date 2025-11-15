@@ -1,9 +1,14 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { prisma } from "../db";
-import { payWithPolicy } from "../policy";
-
+import { payWithPolicy, getPolicyState, POLICY } from "../policy";
 export const campaigns = Router();
+
+
+const asyncH =
+  <T extends (...args: any[]) => Promise<any>>(fn: T) =>
+  (req: any, res: any, next: any) =>
+    Promise.resolve(fn(req, res, next)).catch(next);
 
 // tiny mock pay() that writes a receipt
 async function pay({
@@ -34,6 +39,10 @@ async function pay({
     }
   });
 }
+
+
+
+
 
 // Create a campaign + generate a brief (counts as a paid tool call: $0.02)
 campaigns.post("/", async (req, res) => {
@@ -85,6 +94,20 @@ campaigns.post("/", async (req, res) => {
 
   res.status(201).json({ campaign, brief });
 });
+
+campaigns.get("/:id/policy", asyncH(async (req, res) => {
+  const { id } = req.params;
+
+  const campaign = await prisma.campaign.findUnique({ where: { id } });
+  if (!campaign) return res.status(404).json({ error: "campaign not found" });
+
+  const state = await getPolicyState(id);
+  // You can include budgetCents if you want it in the panel
+  res.json({
+    campaign: { id: campaign.id, budgetCents: campaign.budgetCents },
+    ...state
+  });
+}));
 
 // Simple ledger view
 campaigns.get("/:id/ledger", async (req, res) => {
@@ -157,7 +180,7 @@ campaigns.post("/:id/assets", async (req, res, next) => {
   }
 });
 
-campaigns.post("/:id/captions", async (req, res) => {
+campaigns.post("/:id/captions", asyncH(async (req, res) => {
   const { id } = req.params;
   const { tone = "friendly", variations = 3 } = req.body || {};
 
@@ -187,29 +210,20 @@ campaigns.post("/:id/captions", async (req, res) => {
     }
   });
 
-  // record a 2¢ spend for caption generation
-  const payloadHash = crypto
-    .createHash("sha256")
-    .update(JSON.stringify({ toolCallId: toolCall.id, tool: "caption" }))
-    .digest("hex");
-
-  await prisma.receipt.create({
-    data: {
-      campaignId: campaign.id,
-      amountCents: 2,
-      currency: "USD",
-      rail: "mock",
-      memo: "tool_call",
-      policyApplied: "dev-policy",
-      payloadHash
-    }
+  // 2¢ via policy engine (will throw 403 if tool_call cap is exceeded)
+  await payWithPolicy({
+    campaignId: campaign.id,
+    amountCents: 2,
+    memo: "tool_call",
+    payload: { toolCallId: toolCall.id, tone, variations }
   });
 
   res.status(201).json({ options: opts, toolCallId: toolCall.id });
-});
+})); 
+
 
 // ---- Mock post: POST /campaigns/:id/post
-campaigns.post("/:id/post", async (req, res) => {
+campaigns.post("/:id/post", asyncH(async (req, res) => {
   const { id } = req.params;
   const { platform = "mock", caption, mediaUrl } = req.body || {};
 
@@ -219,12 +233,9 @@ campaigns.post("/:id/post", async (req, res) => {
   });
   if (!campaign) return res.status(404).json({ error: "campaign not found" });
 
-  // Fallback to a simple caption if none provided
   const finalCaption =
-    caption ||
-    `${campaign.product.title}: on sale today. Tap to learn more.`;
+    caption || `${campaign.product.title}: on sale today. Tap to learn more.`;
 
-  // "Schedule" and immediately "post"
   const now = new Date();
   const post = await prisma.post.create({
     data: {
@@ -242,27 +253,17 @@ campaigns.post("/:id/post", async (req, res) => {
     }
   });
 
-  // Charge 1¢ for a "publish" API call
-  const payload = { postId: post.id, platform };
-  const payloadHash = crypto
-    .createHash("sha256")
-    .update(JSON.stringify(payload))
-    .digest("hex");
-
-  await prisma.receipt.create({
-    data: {
-      campaignId: campaign.id,
-      amountCents: 1,
-      currency: "USD",
-      rail: "mock",
-      memo: "post",
-      policyApplied: "dev-policy",
-      payloadHash
-    }
+  // 1¢ “publish” via policy engine (blocks if post cap exceeded)
+  await payWithPolicy({
+    campaignId: campaign.id,
+    amountCents: 1,
+    memo: "post",
+    payload: { postId: post.id, platform }
   });
 
   res.status(201).json({ post });
-});
+})); // note the closing '));'
+
 
 // ---- Summary: GET /campaigns/:id/summary
 campaigns.get("/:id/summary", async (req, res) => {

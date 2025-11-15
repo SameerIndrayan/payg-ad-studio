@@ -77,5 +77,15 @@ export async function payWithPolicy(input: {
   });
 }
 
+// at bottom of src/policy.ts
+export async function getPolicyState(campaignId: string) {
+  const { totalCents, byMemo } = await getTotals(campaignId);
+  return {
+    policy: POLICY,
+    spend: { totalCents, byMemo }
+  };
+}
+
+
 // Export the current policy for potential UI/debug use
 export { POLICY };

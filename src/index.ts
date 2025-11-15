@@ -26,3 +26,17 @@ app.use((err: any, _req, res, _next) => {
   res.status(status).json({ error: err?.message ?? "Internal Server Error" });
 });
 
+
+// Global JSON error handler (must be after all routes)
+app.use((err: any, _req, res, _next) => {
+  const status = typeof err?.status === "number" ? err.status : 500;
+  const msg = err?.message || "Internal Server Error";
+  // Optional: log stack for dev
+  if (status >= 500) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+  }
+  res.status(status).json({ error: msg });
+});
+
+
