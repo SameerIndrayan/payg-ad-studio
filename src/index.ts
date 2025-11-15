@@ -4,10 +4,15 @@ import { products } from "./routes/products";
 import { campaigns } from "./routes/campaigns";
 import { events } from "./routes/events"; 
 import cors from "cors";
+import { prisma } from './db';
 
 
 const app = express();
 app.use(express.json());
+
+app.post('/products/import', async (_req, res) => {
+  res.status(201).json({ ok: true, inserted: 0, updated: 0 });
+});
 
 app.use(cors({
   origin: true,           
@@ -25,6 +30,30 @@ app.use("/campaigns", campaigns);
 app.use("/events", events); 
 
 const PORT = Number(process.env.PORT || 3000);
+ // adjust path if your prisma export is elsewhere
+
+// ...
+
+// Minimal import endpoint so the dashboard button works.
+// Replace the middle section with your real Shopify importer later.
+app.post('/products/import', async (req, res, next) => {
+  try {
+    const before = await prisma.product.count();
+
+    // TODO: plug in your real importer here
+    // await importFromShopify();
+
+    const after = await prisma.product.count();
+    res.status(201).json({
+      ok: true,
+      inserted: Math.max(0, after - before),
+      updated: 0,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
 });
