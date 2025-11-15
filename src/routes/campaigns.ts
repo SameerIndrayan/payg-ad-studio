@@ -1,6 +1,7 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { prisma } from "../db";
+import { payWithPolicy } from "../policy";
 
 export const campaigns = Router();
 
@@ -74,11 +75,12 @@ campaigns.post("/", async (req, res) => {
     }
   });
 
+  // record a 2¢ spend for initial brief generation
   await pay({
     campaignId: campaign.id,
     amountCents: 2,
     memo: "tool_call",
-    payload: { toolCallId: toolCall.id, tool: "caption" }
+    payload: { toolCallId: toolCall.id, tool: "campaign_brief" }
   });
 
   res.status(201).json({ campaign, brief });
@@ -101,47 +103,58 @@ campaigns.get("/:id/ledger", async (req, res) => {
   res.json({ totalCostCents, revenueCents, receipts, events });
 });
 
-
 // ---- Mock asset purchase: POST /campaigns/:id/assets
-campaigns.post("/:id/assets", async (req, res) => {
-  const { id } = req.params;
-  const { vendor = "mockstock", assetType = "image", priceCents = 25 } = req.body || {};
+campaigns.post("/:id/assets", async (req, res, next) => {
+  try {
+    const campaignId = req.params.id;
+    const { vendor = "mockstock", assetType = "image", priceCents } = req.body || {};
 
-  const campaign = await prisma.campaign.findUnique({ where: { id } });
-  if (!campaign) return res.status(404).json({ error: "campaign not found" });
-
-  // record the tool call (selection/generation of asset)
-  const toolCall = await prisma.toolCall.create({
-    data: {
-      campaignId: campaign.id,
-      tool: "image_gen",
-      inputJson: JSON.stringify({ vendor, assetType }),
-      outputJson: JSON.stringify({ picked: `${vendor}/${assetType}` }),
-      utilityScore: 7,
-      costCents: 0 // tool step itself free; the "purchase" is the paid part
+    if (!vendor || !assetType) {
+      return res.status(400).json({ error: "vendor and assetType are required" });
     }
-  });
-
-  // create the asset purchase row
-  const asset = await prisma.assetPurchase.create({
-    data: {
-      campaignId: campaign.id,
-      vendor,
-      assetType,
-      licenseRef: `LIC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
-      costCents: Number(priceCents)
+    const amount = Number(priceCents);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "priceCents must be a positive number" });
     }
-  });
 
-  // write the receipt for the paid asset
-  await pay({
-    campaignId: campaign.id,
-    amountCents: Number(priceCents),
-    memo: "asset_purchase",
-    payload: { toolCallId: toolCall.id, assetId: asset.id, vendor, assetType }
-  });
+    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    if (!campaign) return res.status(404).json({ error: "campaign not found" });
 
-  res.status(201).json({ asset, toolCall });
+    // record the tool call (selection/generation of asset)
+    const toolCall = await prisma.toolCall.create({
+      data: {
+        campaignId: campaign.id,
+        tool: "image_gen",
+        inputJson: JSON.stringify({ vendor, assetType }),
+        outputJson: JSON.stringify({ picked: `${vendor}/${assetType}` }),
+        utilityScore: 7,
+        costCents: 0 // tool step itself free; the "purchase" is the paid part
+      }
+    });
+
+    // create the asset purchase row
+    const asset = await prisma.assetPurchase.create({
+      data: {
+        campaignId: campaign.id,
+        vendor,
+        assetType,
+        licenseRef: `LIC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+        costCents: amount
+      }
+    });
+
+    // write the receipt for the paid asset (policy-enforced)
+    await payWithPolicy({
+      campaignId: campaign.id,
+      amountCents: amount,
+      memo: "asset_purchase",
+      payload: { toolCallId: toolCall.id, assetId: asset.id, vendor, assetType }
+    });
+
+    res.status(201).json({ asset, toolCall });
+  } catch (err) {
+    next(err);
+  }
 });
 
 campaigns.post("/:id/captions", async (req, res) => {
@@ -175,29 +188,25 @@ campaigns.post("/:id/captions", async (req, res) => {
   });
 
   // record a 2¢ spend for caption generation
-  await (async function payCaption() {
-    const crypto = await import("crypto");
-    const payloadHash = crypto
-      .createHash("sha256")
-      .update(JSON.stringify({ toolCallId: toolCall.id, tool: "caption" }))
-      .digest("hex");
+  const payloadHash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ toolCallId: toolCall.id, tool: "caption" }))
+    .digest("hex");
 
-    await prisma.receipt.create({
-      data: {
-        campaignId: campaign.id,
-        amountCents: 2,
-        currency: "USD",
-        rail: "mock",
-        memo: "tool_call",
-        policyApplied: "dev-policy",
-        payloadHash
-      }
-    });
-  })();
+  await prisma.receipt.create({
+    data: {
+      campaignId: campaign.id,
+      amountCents: 2,
+      currency: "USD",
+      rail: "mock",
+      memo: "tool_call",
+      policyApplied: "dev-policy",
+      payloadHash
+    }
+  });
 
   res.status(201).json({ options: opts, toolCallId: toolCall.id });
 });
-
 
 // ---- Mock post: POST /campaigns/:id/post
 campaigns.post("/:id/post", async (req, res) => {

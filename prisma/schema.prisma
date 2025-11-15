@@ -51,6 +51,7 @@ model ToolCall {
   createdAt    DateTime @default(now())
 }
 
+
 model AssetPurchase {
   id          String   @id @default(cuid())
   campaignId  String
