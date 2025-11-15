@@ -254,3 +254,54 @@ campaigns.post("/:id/post", async (req, res) => {
 
   res.status(201).json({ post });
 });
+
+// ---- Summary: GET /campaigns/:id/summary
+campaigns.get("/:id/summary", async (req, res) => {
+  const { id } = req.params;
+
+  const [campaign, receipts, events, posts] = await Promise.all([
+    prisma.campaign.findUnique({
+      where: { id },
+      include: { product: true }
+    }),
+    prisma.receipt.findMany({ where: { campaignId: id } }),
+    prisma.attributionEvent.findMany({ where: { campaignId: id } }),
+    prisma.post.findMany({ where: { campaignId: id } })
+  ]);
+
+  if (!campaign) return res.status(404).json({ error: "campaign not found" });
+
+  const totalCostCents = receipts.reduce((s, r) => s + r.amountCents, 0);
+  const revenueCents = events
+    .filter(e => e.type === "sale" && e.amountCents)
+    .reduce((s, e) => s + (e.amountCents || 0), 0);
+
+  const profitCents = (revenueCents || 0) - (totalCostCents || 0);
+  const roi = totalCostCents > 0 ? revenueCents / totalCostCents : null;
+
+  res.json({
+    campaign: {
+      id: campaign.id,
+      goal: campaign.goal,
+      status: campaign.status,
+      budgetCents: campaign.budgetCents
+    },
+    product: {
+      id: campaign.product.id,
+      title: campaign.product.title,
+      priceCents: campaign.product.priceCents,
+      productUrl: campaign.product.productUrl
+    },
+    totals: {
+      costCents: totalCostCents,
+      revenueCents,
+      profitCents,
+      roi // e.g., 83.33 means 83.33x revenue per $1 cost
+    },
+    counts: {
+      receipts: receipts.length,
+      sales: events.filter(e => e.type === "sale").length,
+      posts: posts.length
+    }
+  });
+});
