@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  source      String   @default("shopify")
+  sourceId    String?
+  title       String
+  description String?
+  imageUrl    String?
+  priceCents  Int?
+  productUrl  String?
+  tags        String?
+
+  campaigns   Campaign[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Campaign {
+  id           String    @id @default(cuid())
+  productId    String
+  product      Product   @relation(fields: [productId], references: [id])
+  goal         String
+  budgetCents  Int       @default(0)
+  status       String    @default("draft") // draft | running | complete
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  toolCalls    ToolCall[]
+  assetBuys    AssetPurchase[]
+  posts        Post[]
+  events       AttributionEvent[]
+  receipts     Receipt[]
+}
+
+model ToolCall {
+  id           String   @id @default(cuid())
+  campaignId   String
+  campaign     Campaign @relation(fields: [campaignId], references: [id])
+  tool         String
+  inputJson    String
+  outputJson   String?
+  utilityScore Int?
+  costCents    Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model AssetPurchase {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id])
+  vendor      String
+  assetType   String
+  licenseRef  String?
+  costCents   Int      @default(0)
+  receiptId   String?
+  createdAt   DateTime @default(now())
+}
+
+model Post {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id])
+  platform    String
+  caption     String
+  mediaUrl    String?
+  scheduledAt DateTime?
+  postedAt    DateTime?
+  postUrl     String?
+}
+
+model AttributionEvent {
+  id           String   @id @default(cuid())
+  campaignId   String
+  campaign     Campaign @relation(fields: [campaignId], references: [id])
+  type         String   // impression | click | sale
+  amountCents  Int?
+  metadataJson String?
+  occurredAt   DateTime
+  createdAt    DateTime @default(now())
+}
+
+model Receipt {
+  id            String    @id @default(cuid())
+  campaignId    String?
+  campaign      Campaign? @relation(fields: [campaignId], references: [id])
+  orderId       String?
+  amountCents   Int
+  currency      String   @default("USD")
+  rail          String   @default("mock")
+  memo          String   // tool_call | asset_purchase | post
+  policyApplied String?
+  payloadHash   String
+  createdAt     DateTime @default(now())
+}
